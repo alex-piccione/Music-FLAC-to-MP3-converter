@@ -22,7 +22,7 @@ class FlacToMp3Converter:
             "destination_folder": "",
             "filename_template": "{artist} - {title}",
             "lame_path": r"C:\Program Files (x86)\foobar2000\encoders\lame.exe",
-            "quality": "320"
+            "quality": "192"
         }
         
         self.load_settings()
