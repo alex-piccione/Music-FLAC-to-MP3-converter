@@ -343,35 +343,62 @@ class FlacToMp3Converter:
         quality = self.quality_var.get()
         
         try:
-            # Create the command pipeline: ffmpeg -> lame
+            # Command to decode FLAC to WAV via pipe
             ffmpeg_cmd = [
                 ffmpeg_path, "-y", "-i", str(flac_path), "-f", "wav", "-"
             ]
             
+            # Command to encode WAV (from stdin) to MP3
             lame_cmd = [
                 lame_path, "-b", quality, "-", str(output_path)
             ]
-            
-            # Run ffmpeg process
+
+            self.log(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            self.log(f"LAME command: {' '.join(lame_cmd)}")
+
+            # Start FFmpeg process, sending its stdout to a pipe
+            # stderr=subprocess.PIPE is crucial to capture and prevent its buffer from filling
             ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # Run lame process with ffmpeg output as input
+                        
+            # Start LAME process, taking its stdin from FFmpeg's stdout
+            # stderr=subprocess.PIPE is crucial for LAME too
             lame_process = subprocess.Popen(lame_cmd, stdin=ffmpeg_process.stdout, stderr=subprocess.PIPE)
             
-            # Close ffmpeg stdout in parent process
-            ffmpeg_process.stdout.close()
-            
-            # Wait for both processes to complete and capture stderr
-            lame_stderr = lame_process.communicate()[1].decode('utf-8', errors='ignore')
-            ffmpeg_stderr = ffmpeg_process.communicate()[1].decode('utf-8', errors='ignore')
+            # IMPORTANT: Close ffmpeg_process.stdout in the parent process.
+            # This releases the pipe for lame_process to read from, and ensures
+            # that when lame_process finishes, ffmpeg_process knows the pipe is closed.
+            ffmpeg_process.stdout.close() 
+
+            # Wait for LAME to finish AND capture its stderr
+            # This is the correct way to use communicate with pipes
+            _lame_stdout, lame_stderr = lame_process.communicate()
+            lame_stderr_decoded = lame_stderr.decode('utf-8', errors='ignore')
+
+            # Wait for FFmpeg to finish (if it hasn't already) AND capture its stderr
+            # This is critical. Even if LAME finished, FFmpeg might still be running
+            # if its stderr buffer filled up.
+            _ffmpeg_stdout, ffmpeg_stderr = ffmpeg_process.communicate()
+            ffmpeg_stderr_decoded = ffmpeg_stderr.decode('utf-8', errors='ignore')
 
             if lame_process.returncode == 0 and ffmpeg_process.returncode == 0:
                 return True
             else:
-                self.log(f"FFmpeg stderr: {ffmpeg_stderr.strip()}")
-                self.log(f"LAME stderr: {lame_stderr.strip()}")
-                return False
+                self.log(f"FFmpeg stderr: {ffmpeg_stderr_decoded.strip()}")
+                self.log(f"LAME stderr: {lame_stderr_decoded.strip()}")
                 
+                # If the output file doesn't exist, it definitely failed.
+                if not Path(output_path).exists() or Path(output_path).stat().st_size == 0:
+                     self.log(f"Error: Output file not created or is empty: {output_path.name}")
+                     return False
+                
+                # Check for specific non-zero return codes that might indicate a problem
+                if ffmpeg_process.returncode != 0:
+                    self.log(f"FFmpeg exited with non-zero code: {ffmpeg_process.returncode}")
+                if lame_process.returncode != 0:
+                    self.log(f"LAME exited with non-zero code: {lame_process.returncode}")
+
+                return False
+            
         except Exception as e:
             self.log(f"Conversion error for {flac_path.name}: {str(e)}")
             return False
