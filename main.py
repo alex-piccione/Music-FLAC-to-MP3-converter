@@ -21,7 +21,7 @@ class FlacToMp3Converter:
             "source_folder": "",
             "destination_folder": "",
             "filename_template": "{artist} - {title}",
-            "lame_path": r"C:\Program Files (x86)\foobar2000\encoders\lame.exe",
+            "lame_path": r"C:\Program Files (x86)\foobar2000\encoders\lame.exe" if os.name == "nt" else "/usr/bin/lame",
             "quality": "192"
         }
         
@@ -179,13 +179,17 @@ class FlacToMp3Converter:
         self.log_text.insert(tk.END, f"{message}\n")
         self.log_text.see(tk.END)
         self.root.update_idletasks()
-    
+
     def get_flac_metadata(self, flac_path):
-        """Extract metadata from FLAC file using ffprobe"""
+        """
+        Extract metadata from FLAC file using ffprobe.
+
+        If metadata extraction fails, falls back to using the filename as the title and default values for other fields.
+        """
         try:
             cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(flac_path)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
+
             if result.returncode == 0:
                 import json
                 data = json.loads(result.stdout)
@@ -243,7 +247,7 @@ class FlacToMp3Converter:
         try:
             # Create the command pipeline: ffmpeg -> lame
             ffmpeg_cmd = [
-                "ffmpeg", "-i", str(flac_path), "-f", "wav", "-"
+                "ffmpeg", "-y", "-i", str(flac_path), "-f", "wav", "-"
             ]
             
             lame_cmd = [
@@ -259,13 +263,15 @@ class FlacToMp3Converter:
             # Close ffmpeg stdout in parent process
             ffmpeg_process.stdout.close()
             
-            # Wait for both processes to complete
+            # Wait for both processes to complete and capture stderr
+            #_, lame_stderr = lame_process.communicate()
             lame_process.wait()
             ffmpeg_process.wait()
             
             if lame_process.returncode == 0:
                 return True
             else:
+                #error = lame_stderr.decode('utf-8', errors='ignore')
                 error = lame_process.stderr.read().decode('utf-8', errors='ignore')
                 self.log(f"LAME error: {error}")
                 return False
@@ -334,10 +340,10 @@ class FlacToMp3Converter:
         
         for i, flac_path in enumerate(flac_files):
             # Update progress
+            #progress = ((i + 1) / total_files) * 100
             progress = (i / total_files) * 100
             self.progress_var.set(progress)
             self.status_var.set(f"Converting {flac_path.name}...")
-            
             # Get metadata
             metadata = self.get_flac_metadata(flac_path)
             
@@ -366,6 +372,7 @@ class FlacToMp3Converter:
 def main():
     root = tk.Tk()
     app = FlacToMp3Converter(root)
+    app.test_lame()
     root.mainloop()
 
 if __name__ == "__main__":
