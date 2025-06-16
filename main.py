@@ -6,6 +6,7 @@ import subprocess
 import threading
 from pathlib import Path
 import re
+import tempfile
 
 class FlacToMp3Converter:
     def __init__(self, root):
@@ -245,7 +246,7 @@ class FlacToMp3Converter:
             result = subprocess.run([exec_path, test_arg], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 status_label.config(text="✅") 
-                self.log(f"{name} test successful.")
+                #self.log(f"{name} test successful.")
                 return True
             else:
                 messagebox.showerror("Error", f"{name} test failed. Error: {result.stderr}")
@@ -343,65 +344,158 @@ class FlacToMp3Converter:
         quality = self.quality_var.get()
         
         try:
-            # Command to decode FLAC to WAV via pipe
+            # Create the command pipeline: ffmpeg -> lame
             ffmpeg_cmd = [
-                ffmpeg_path, "-y", "-i", str(flac_path), "-f", "wav", "-"
+                ffmpeg_path, "-y", "-i", str(flac_path),
+                "-f", "wav", # Specify output format as WAV for piping
+                "-acodec", "pcm_s16le", # Force PCM 16-bit little-endian for raw audio
+                "-" # Output to stdout
             ]
             
-            # Command to encode WAV (from stdin) to MP3
             lame_cmd = [
-                lame_path, "-b", quality, "-", str(output_path)
+                lame_path, "-b", quality,
+                "-", # Input from stdin
+                str(output_path)
             ]
-
-            self.log(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
-            self.log(f"LAME command: {' '.join(lame_cmd)}")
-
-            # Start FFmpeg process, sending its stdout to a pipe
-            # stderr=subprocess.PIPE is crucial to capture and prevent its buffer from filling
-            ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        
-            # Start LAME process, taking its stdin from FFmpeg's stdout
-            # stderr=subprocess.PIPE is crucial for LAME too
-            lame_process = subprocess.Popen(lame_cmd, stdin=ffmpeg_process.stdout, stderr=subprocess.PIPE)
             
-            # IMPORTANT: Close ffmpeg_process.stdout in the parent process.
-            # This releases the pipe for lame_process to read from, and ensures
-            # that when lame_process finishes, ffmpeg_process knows the pipe is closed.
-            ffmpeg_process.stdout.close() 
+            # Run ffmpeg process, redirect stderr to DEVNULL to prevent blocking from its output
+            # We'll still retrieve it later with communicate() but it won't block the pipe during transfer
+            ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE # Changed to PIPE to still allow capture later
+                                        # But the key is that communicate() will consume it
+            )
+            
+            # Run lame process, feed it ffmpeg's stdout, and redirect lame's stderr to DEVNULL
+            lame_process = subprocess.Popen(
+                lame_cmd,
+                stdin=ffmpeg_process.stdout,
+                stderr=subprocess.PIPE # Changed to PIPE to still allow capture later
+            )
+            
+            # Close ffmpeg stdout in the parent process. This is crucial
+            # to prevent deadlocks when the ffmpeg process finishes
+            # writing and closes its stdout, signaling EOF to lame.
+            ffmpeg_process.stdout.close()
+            
+            # Wait for both processes to complete and capture their stderr
+            # communicate() here does the waiting and deadlock prevention
+            # It's crucial to call communicate() on BOTH processes.
+            # Call lame_process.communicate() first because it relies on ffmpeg's stdout.
+            # Once lame is done, ffmpeg should also be done or finish shortly.
+            lame_stdout_data, lame_stderr_data = lame_process.communicate()
+            ffmpeg_stdout_data, ffmpeg_stderr_data = ffmpeg_process.communicate()
 
-            # Wait for LAME to finish AND capture its stderr
-            # This is the correct way to use communicate with pipes
-            _lame_stdout, lame_stderr = lame_process.communicate()
-            lame_stderr_decoded = lame_stderr.decode('utf-8', errors='ignore')
-
-            # Wait for FFmpeg to finish (if it hasn't already) AND capture its stderr
-            # This is critical. Even if LAME finished, FFmpeg might still be running
-            # if its stderr buffer filled up.
-            _ffmpeg_stdout, ffmpeg_stderr = ffmpeg_process.communicate()
-            ffmpeg_stderr_decoded = ffmpeg_stderr.decode('utf-8', errors='ignore')
+            # Decode stderr outputs for logging if there's any output
+            lame_stderr_decoded = lame_stderr_data.decode('utf-8', errors='ignore').strip()
+            ffmpeg_stderr_decoded = ffmpeg_stderr_data.decode('utf-8', errors='ignore').strip()
 
             if lame_process.returncode == 0 and ffmpeg_process.returncode == 0:
                 return True
             else:
-                self.log(f"FFmpeg stderr: {ffmpeg_stderr_decoded.strip()}")
-                self.log(f"LAME stderr: {lame_stderr_decoded.strip()}")
-                
-                # If the output file doesn't exist, it definitely failed.
-                if not Path(output_path).exists() or Path(output_path).stat().st_size == 0:
-                     self.log(f"Error: Output file not created or is empty: {output_path.name}")
-                     return False
-                
-                # Check for specific non-zero return codes that might indicate a problem
-                if ffmpeg_process.returncode != 0:
-                    self.log(f"FFmpeg exited with non-zero code: {ffmpeg_process.returncode}")
-                if lame_process.returncode != 0:
-                    self.log(f"LAME exited with non-zero code: {lame_process.returncode}")
-
+                self.log(f"Conversion failed for {flac_path.name}.")
+                if ffmpeg_stderr_decoded:
+                    self.log(f"FFmpeg stderr: {ffmpeg_stderr_decoded}")
+                if lame_stderr_decoded:
+                    self.log(f"LAME stderr: {lame_stderr_decoded}")
+                self.log(f"FFmpeg return code: {ffmpeg_process.returncode}, LAME return code: {lame_process.returncode}")
                 return False
-            
+                
         except Exception as e:
             self.log(f"Conversion error for {flac_path.name}: {str(e)}")
             return False
+
+    def convert_file(self, flac_path, output_path):
+        """Convert single FLAC file to MP3 via an intermediate WAV file."""
+        ffmpeg_path = self.ffmpeg_path_var.get()
+        lame_path = self.lame_path_var.get()
+        quality = self.quality_var.get()
+        
+        temp_wav_path = None # Initialize to None
+
+        try:
+            # 1. Create a temporary WAV file path
+            # Using NamedTemporaryFile for automatic cleanup, but we need the path string for subprocess
+            # We explicitly create it, use it, and then delete it.
+            # suffix ensures the correct extension, delete=False means we manage deletion
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav_file:
+                temp_wav_path = Path(temp_wav_file.name)
+            
+            #self.log(f"Intermediate WAV file: {temp_wav_path.name}")
+
+            # 2. Convert FLAC to WAV using FFmpeg
+            ffmpeg_cmd = [
+                ffmpeg_path, "-y", # Overwrite without asking
+                "-i", str(flac_path),
+                "-f", "wav", # Output format
+                "-acodec", "pcm_s16le", # Force PCM 16-bit little-endian
+                str(temp_wav_path) # Output to temporary WAV file
+            ]
+            
+            #self.log(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            ffmpeg_result = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=120 # Increased timeout for conversion
+            )
+
+            if ffmpeg_result.returncode != 0:
+                self.log(f"FFmpeg conversion failed for {flac_path.name}.")
+                self.log(f"FFmpeg stderr: {ffmpeg_result.stderr.strip()}")
+                if ffmpeg_result.stdout.strip(): # Log stdout if it exists
+                    self.log(f"FFmpeg stdout: {ffmpeg_result.stdout.strip()}")
+                return False
+
+            self.log("FFmpeg conversion to WAV successful.")
+
+            # 3. Convert WAV to MP3 using LAME
+            lame_cmd = [
+                lame_path,
+                "-b", quality, # Bitrate
+                str(temp_wav_path), # Input from temporary WAV file
+                str(output_path) # Output to final MP3 file
+            ]
+
+            #self.log(f"LAME command: {' '.join(lame_cmd)}")
+            lame_result = subprocess.run(
+                lame_cmd,
+                capture_output=True,
+                text=True,
+                timeout=120 # Increased timeout
+            )
+
+            if lame_result.returncode != 0:
+                self.log(f"LAME conversion failed for {temp_wav_path.name}.")
+                self.log(f"LAME stderr: {lame_result.stderr.strip()}")
+                if lame_result.stdout.strip(): # Log stdout if it exists
+                    self.log(f"LAME stdout: {lame_result.stdout.strip()}")
+                return False
+
+            self.log("LAME conversion to MP3 successful.")
+            return True
+
+        except FileNotFoundError as e:
+            self.log(f"Executable not found: {e}. Please check LAME/FFmpeg paths in settings.")
+            messagebox.showerror("Error", f"Executable not found: {e}. Please check LAME/FFmpeg paths in settings.")
+            return False
+        except subprocess.TimeoutExpired:
+            self.log(f"Conversion timed out for {flac_path.name}.")
+            messagebox.showerror("Timeout", f"Conversion timed out for {flac_path.name}.")
+            return False
+        except Exception as e:
+            self.log(f"An unexpected error occurred during conversion of {flac_path.name}: {str(e)}")
+            messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")
+            return False
+        finally:
+            # 4. Clean up temporary WAV file
+            if temp_wav_path and temp_wav_path.exists():
+                try:
+                    os.remove(temp_wav_path)
+                    self.log(f"Cleaned up temporary WAV: {temp_wav_path.name}")
+                except OSError as e:
+                    self.log(f"Error cleaning up temporary WAV {temp_wav_path.name}: {e}")
     
     def start_conversion(self):
         """Start the conversion process in a separate thread"""
