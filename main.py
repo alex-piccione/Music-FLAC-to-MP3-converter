@@ -14,7 +14,7 @@ class FlacToMp3Converter:
         self.root.geometry("800x750") # Increased height to accommodate new fields
         
         # Configuration file path
-        self.config_file = "converter_config.json"
+        self.config_file = "config.json"
         
         # Default settings
         self.settings = {
