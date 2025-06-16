@@ -11,7 +11,7 @@ class FlacToMp3Converter:
     def __init__(self, root):
         self.root = root
         self.root.title("FLAC to MP3 Converter")
-        self.root.geometry("800x600")
+        self.root.geometry("800x750") # Increased height to accommodate new fields
         
         # Configuration file path
         self.config_file = "converter_config.json"
@@ -22,6 +22,8 @@ class FlacToMp3Converter:
             "destination_folder": "",
             "filename_template": "{artist} - {title}",
             "lame_path": r"C:\Program Files (x86)\foobar2000\encoders\lame.exe" if os.name == "nt" else "/usr/bin/lame",
+            "ffmpeg_path": r"C:\Program Files\ffmpeg\bin\ffmpeg.exe" if os.name == "nt" else "/usr/bin/ffmpeg",
+            "ffprobe_path": r"C:\Program Files\ffmpeg\bin\ffprobe.exe" if os.name == "nt" else "/usr/bin/ffprobe",
             "quality": "192"
         }
         
@@ -82,23 +84,64 @@ class FlacToMp3Converter:
         ttk.Label(main_frame, text=help_text, font=("Arial", 8)).grid(row=3, column=1, sticky=tk.W, padx=5)
         
         # LAME path
-        ttk.Label(main_frame, text="LAME Encoder Path:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        self.lame_var = tk.StringVar(value=self.settings["lame_path"])
-        self.lame_entry = ttk.Entry(main_frame, textvariable=self.lame_var, width=60)
-        self.lame_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
-        ttk.Button(main_frame, text="Browse", command=self.browse_lame).grid(row=4, column=2, padx=5, pady=5)
+        lame_frame = ttk.Frame(main_frame) # Changed parent from self to main_frame
+        lame_frame.grid(row=4, column=0, columnspan=3, sticky='w', padx=0, pady=5) # Adjusted row and span
         
-        # Quality selection
-        ttk.Label(main_frame, text="MP3 Quality (kbps):").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Label(lame_frame, text="LAME Encoder Path:").grid(row=0, column=0, sticky='w')
+        self.lame_path_var = tk.StringVar(value=self.settings["lame_path"])
+        self.lame_path_entry = ttk.Entry(lame_frame, textvariable=self.lame_path_var, width=50) # Bind textvariable
+        self.lame_path_entry.grid(row=0, column=1, padx=5)
+        
+        self.lame_status_label = ttk.Label(lame_frame, text="❓")
+        self.lame_status_label.grid(row=0, column=2, padx=5)
+        
+        browse_button_lame = ttk.Button(lame_frame, text="Browse", command=self.browse_lame)
+        browse_button_lame.grid(row=0, column=3, padx=5)
+        ttk.Button(lame_frame, text="Test", command=self.test_lame).grid(row=0, column=4, padx=5) # Added Test button
+        
+        # FFmpeg path
+        ffmpeg_frame = ttk.Frame(main_frame)
+        ffmpeg_frame.grid(row=5, column=0, columnspan=3, sticky='w', padx=0, pady=5)
+        
+        ttk.Label(ffmpeg_frame, text="FFmpeg Executable Path:").grid(row=0, column=0, sticky='w')
+        self.ffmpeg_path_var = tk.StringVar(value=self.settings["ffmpeg_path"])
+        self.ffmpeg_path_entry = ttk.Entry(ffmpeg_frame, textvariable=self.ffmpeg_path_var, width=50)
+        self.ffmpeg_path_entry.grid(row=0, column=1, padx=5)
+        
+        self.ffmpeg_status_label = ttk.Label(ffmpeg_frame, text="❓")
+        self.ffmpeg_status_label.grid(row=0, column=2, padx=5)
+        
+        browse_button_ffmpeg = ttk.Button(ffmpeg_frame, text="Browse", command=self.browse_ffmpeg)
+        browse_button_ffmpeg.grid(row=0, column=3, padx=5)
+        ttk.Button(ffmpeg_frame, text="Test", command=self.test_ffmpeg).grid(row=0, column=4, padx=5)
+
+        # FFprobe path
+        ffprobe_frame = ttk.Frame(main_frame)
+        ffprobe_frame.grid(row=6, column=0, columnspan=3, sticky='w', padx=0, pady=5)
+        
+        ttk.Label(ffprobe_frame, text="FFprobe Executable Path:").grid(row=0, column=0, sticky='w')
+        self.ffprobe_path_var = tk.StringVar(value=self.settings["ffprobe_path"])
+        self.ffprobe_path_entry = ttk.Entry(ffprobe_frame, textvariable=self.ffprobe_path_var, width=50)
+        self.ffprobe_path_entry.grid(row=0, column=1, padx=5)
+        
+        self.ffprobe_status_label = ttk.Label(ffprobe_frame, text="❓")
+        self.ffprobe_status_label.grid(row=0, column=2, padx=5)
+        
+        browse_button_ffprobe = ttk.Button(ffprobe_frame, text="Browse", command=self.browse_ffprobe)
+        browse_button_ffprobe.grid(row=0, column=3, padx=5)
+        ttk.Button(ffprobe_frame, text="Test", command=self.test_ffprobe).grid(row=0, column=4, padx=5)
+        
+        # Quality selection (adjusted row)
+        ttk.Label(main_frame, text="MP3 Quality (kbps):").grid(row=7, column=0, sticky=tk.W, pady=5)
         self.quality_var = tk.StringVar(value=self.settings["quality"])
         quality_combo = ttk.Combobox(main_frame, textvariable=self.quality_var, 
-                                   values=["128", "160", "192", "256", "320"], 
-                                   state="readonly", width=10)
-        quality_combo.grid(row=5, column=1, sticky=tk.W, padx=5, pady=5)
+                                     values=["128", "160", "192", "256", "320"], 
+                                     state="readonly", width=10)
+        quality_combo.grid(row=7, column=1, sticky=tk.W, padx=5, pady=5)
         
-        # Progress frame
+        # Progress frame (adjusted row)
         progress_frame = ttk.LabelFrame(main_frame, text="Conversion Progress", padding="5")
-        progress_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        progress_frame.grid(row=8, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
         progress_frame.columnconfigure(0, weight=1)
         
         self.progress_var = tk.DoubleVar()
@@ -109,21 +152,19 @@ class FlacToMp3Converter:
         self.status_label = ttk.Label(progress_frame, textvariable=self.status_var)
         self.status_label.grid(row=1, column=0, pady=5)
         
-        # Buttons frame
+        # Buttons frame (adjusted row)
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=7, column=0, columnspan=3, pady=10)
+        button_frame.grid(row=9, column=0, columnspan=3, pady=10)
         
         self.convert_button = ttk.Button(button_frame, text="Convert Files", command=self.start_conversion)
         self.convert_button.pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(button_frame, text="Test LAME", command=self.test_lame).pack(side=tk.LEFT, padx=5)
-        
-        # Log frame
+        # Log frame (adjusted row)
         log_frame = ttk.LabelFrame(main_frame, text="Log", padding="5")
-        log_frame.grid(row=8, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        log_frame.grid(row=10, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        main_frame.rowconfigure(8, weight=1)
+        main_frame.rowconfigure(10, weight=1) # Ensure log frame expands vertically
         
         self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD)
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
@@ -135,45 +176,87 @@ class FlacToMp3Converter:
     def browse_source(self):
         """Browse for source folder"""
         folder = filedialog.askdirectory(title="Select source folder with FLAC files",
-                                       initialdir=self.source_var.get())
+                                         initialdir=self.source_var.get() if self.source_var.get() else os.getcwd())
         if folder:
             self.source_var.set(folder)
     
     def browse_destination(self):
         """Browse for destination folder"""
         folder = filedialog.askdirectory(title="Select destination folder for MP3 files",
-                                       initialdir=self.dest_var.get())
+                                         initialdir=self.dest_var.get() if self.dest_var.get() else os.getcwd())
         if folder:
             self.dest_var.set(folder)
     
     def browse_lame(self):
         """Browse for LAME executable"""
+        initial_dir = os.path.dirname(self.lame_path_var.get()) if self.lame_path_var.get() else os.getcwd()
         file_path = filedialog.askopenfilename(title="Select LAME executable",
-                                             filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
-                                             initialdir=os.path.dirname(self.lame_var.get()))
+                                               filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
+                                               initialdir=initial_dir)
         if file_path:
-            self.lame_var.set(file_path)
+            self.lame_path_var.set(file_path)
+            self.test_lame() # Test immediately after selection
     
-    def test_lame(self):
-        """Test if LAME encoder is working"""
-        lame_path = self.lame_var.get()
-        if not os.path.exists(lame_path):
-            messagebox.showerror("Error", f"LAME encoder not found at: {lame_path}")
-            return
+    def browse_ffmpeg(self):
+        """Browse for FFmpeg executable"""
+        initial_dir = os.path.dirname(self.ffmpeg_path_var.get()) if self.ffmpeg_path_var.get() else os.getcwd()
+        file_path = filedialog.askopenfilename(title="Select FFmpeg executable",
+                                               filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
+                                               initialdir=initial_dir)
+        if file_path:
+            self.ffmpeg_path_var.set(file_path)
+            self.test_ffmpeg() # Test immediately after selection
+
+    def browse_ffprobe(self):
+        """Browse for FFprobe executable"""
+        initial_dir = os.path.dirname(self.ffprobe_path_var.get()) if self.ffprobe_path_var.get() else os.getcwd()
+        file_path = filedialog.askopenfilename(title="Select FFprobe executable",
+                                               filetypes=[("Executable files", "*.exe"), ("All files", "*.*")],
+                                               initialdir=initial_dir)
+        if file_path:
+            self.ffprobe_path_var.set(file_path)
+            self.test_ffprobe() # Test immediately after selection
+
+    def test_executable(self, path_var, status_label, name, test_arg="--help"):
+        """Generic function to test an executable"""
+        status_label.config(text="❓") 
+        exec_path = path_var.get()
+        if not os.path.exists(exec_path):
+            messagebox.showerror("Error", f"{name} not found at: {exec_path}")
+            status_label.config(text="❌")
+            self.log(f"Error: {name} not found at {exec_path}")
+            return False
         
         try:
-            result = subprocess.run([lame_path, "--help"], 
-                                  capture_output=True, text=True, timeout=10)
+            # Use 'version' or 'help' for a quick test
+            result = subprocess.run([exec_path, test_arg], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
-                messagebox.showinfo("Success", "LAME encoder is working correctly!")
-                self.log("LAME encoder test successful")
+                status_label.config(text="✅") 
+                self.log(f"{name} test successful.")
+                return True
             else:
-                messagebox.showerror("Error", "LAME encoder test failed")
-                self.log("LAME encoder test failed")
+                messagebox.showerror("Error", f"{name} test failed. Error: {result.stderr}")
+                status_label.config(text="❌")
+                self.log(f"Error: {name} test failed. Output: {result.stderr}")
+                return False
         except Exception as e:
-            messagebox.showerror("Error", f"Error testing LAME: {str(e)}")
-            self.log(f"Error testing LAME: {str(e)}")
-    
+            messagebox.showerror("Error", f"Error testing {name}: {str(e)}")
+            status_label.config(text="❌") 
+            self.log(f"Error testing {name}: {str(e)}")
+            return False
+
+    def test_lame(self):
+        """Test if LAME encoder is working"""
+        self.test_executable(self.lame_path_var, self.lame_status_label, "LAME encoder", "--version") # Using --version for LAME
+
+    def test_ffmpeg(self):
+        """Test if FFmpeg is working"""
+        self.test_executable(self.ffmpeg_path_var, self.ffmpeg_status_label, "FFmpeg", "-version") # Using -version for FFmpeg
+
+    def test_ffprobe(self):
+        """Test if FFprobe is working"""
+        self.test_executable(self.ffprobe_path_var, self.ffprobe_status_label, "FFprobe", "-version") # Using -version for FFprobe
+        
     def log(self, message):
         """Add message to log"""
         self.log_text.insert(tk.END, f"{message}\n")
@@ -186,8 +269,9 @@ class FlacToMp3Converter:
 
         If metadata extraction fails, falls back to using the filename as the title and default values for other fields.
         """
+        ffprobe_path = self.ffprobe_path_var.get()
         try:
-            cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(flac_path)]
+            cmd = [ffprobe_path, "-v", "quiet", "-print_format", "json", "-show_format", str(flac_path)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode == 0:
@@ -207,8 +291,10 @@ class FlacToMp3Converter:
                     "track": normalized_tags.get("track", ""),
                     "year": normalized_tags.get("date", normalized_tags.get("year", ""))
                 }
+            else:
+                self.log(f"ffprobe failed for {flac_path.name}: {result.stderr.strip()}")
         except Exception as e:
-            self.log(f"Error reading metadata from {flac_path}: {str(e)}")
+            self.log(f"Error reading metadata from {flac_path.name}: {str(e)}")
         
         # Fallback to filename
         filename = Path(flac_path).stem
@@ -234,20 +320,19 @@ class FlacToMp3Converter:
             formatted = template.format(**metadata)
             return self.sanitize_filename(formatted)
         except KeyError as e:
-            self.log(f"Invalid template variable: {e}")
+            self.log(f"Invalid template variable: {e}. Falling back to default filename format.")
             return self.sanitize_filename(f"{metadata['artist']} - {metadata['title']}")
     
     def convert_file(self, flac_path, output_path):
         """Convert single FLAC file to MP3"""
-        lame_path = self.lame_var.get()
+        lame_path = self.lame_path_var.get()
+        ffmpeg_path = self.ffmpeg_path_var.get()
         quality = self.quality_var.get()
         
-        # Use ffmpeg to decode FLAC and pipe to LAME
-        # This is more reliable than using LAME directly with FLAC
         try:
             # Create the command pipeline: ffmpeg -> lame
             ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", str(flac_path), "-f", "wav", "-"
+                ffmpeg_path, "-y", "-i", str(flac_path), "-f", "wav", "-"
             ]
             
             lame_cmd = [
@@ -264,20 +349,18 @@ class FlacToMp3Converter:
             ffmpeg_process.stdout.close()
             
             # Wait for both processes to complete and capture stderr
-            #_, lame_stderr = lame_process.communicate()
-            lame_process.wait()
-            ffmpeg_process.wait()
-            
-            if lame_process.returncode == 0:
+            lame_stderr = lame_process.communicate()[1].decode('utf-8', errors='ignore')
+            ffmpeg_stderr = ffmpeg_process.communicate()[1].decode('utf-8', errors='ignore')
+
+            if lame_process.returncode == 0 and ffmpeg_process.returncode == 0:
                 return True
             else:
-                #error = lame_stderr.decode('utf-8', errors='ignore')
-                error = lame_process.stderr.read().decode('utf-8', errors='ignore')
-                self.log(f"LAME error: {error}")
+                self.log(f"FFmpeg stderr: {ffmpeg_stderr.strip()}")
+                self.log(f"LAME stderr: {lame_stderr.strip()}")
                 return False
                 
         except Exception as e:
-            self.log(f"Conversion error: {str(e)}")
+            self.log(f"Conversion error for {flac_path.name}: {str(e)}")
             return False
     
     def start_conversion(self):
@@ -286,7 +369,9 @@ class FlacToMp3Converter:
         self.settings["source_folder"] = self.source_var.get()
         self.settings["destination_folder"] = self.dest_var.get()
         self.settings["filename_template"] = self.template_var.get()
-        self.settings["lame_path"] = self.lame_var.get()
+        self.settings["lame_path"] = self.lame_path_var.get()
+        self.settings["ffmpeg_path"] = self.ffmpeg_path_var.get()
+        self.settings["ffprobe_path"] = self.ffprobe_path_var.get()
         self.settings["quality"] = self.quality_var.get()
         
         # Validate inputs
@@ -295,7 +380,15 @@ class FlacToMp3Converter:
             return
         
         if not os.path.exists(self.settings["lame_path"]):
-            messagebox.showerror("Error", "LAME encoder not found")
+            messagebox.showerror("Error", "LAME encoder not found at the specified path.")
+            return
+            
+        if not os.path.exists(self.settings["ffmpeg_path"]):
+            messagebox.showerror("Error", "FFmpeg executable not found at the specified path.")
+            return
+
+        if not os.path.exists(self.settings["ffprobe_path"]):
+            messagebox.showerror("Error", "FFprobe executable not found at the specified path.")
             return
         
         if not self.settings["destination_folder"]:
@@ -339,11 +432,10 @@ class FlacToMp3Converter:
         failed = 0
         
         for i, flac_path in enumerate(flac_files):
-            # Update progress
-            #progress = ((i + 1) / total_files) * 100
             progress = (i / total_files) * 100
             self.progress_var.set(progress)
             self.status_var.set(f"Converting {flac_path.name}...")
+            
             # Get metadata
             metadata = self.get_flac_metadata(flac_path)
             
@@ -372,7 +464,10 @@ class FlacToMp3Converter:
 def main():
     root = tk.Tk()
     app = FlacToMp3Converter(root)
+    # Perform initial tests for all executables on startup
     app.test_lame()
+    app.test_ffmpeg()
+    app.test_ffprobe()
     root.mainloop()
 
 if __name__ == "__main__":
