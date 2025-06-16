@@ -322,11 +322,8 @@ class FlacToMp3Converter:
     
     def sanitize_filename(self, filename):
         """Remove invalid characters from filename"""
-        # Remove or replace invalid characters
-        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        # Remove leading/trailing spaces and dots
-        filename = filename.strip(' .')
-        return filename
+        # Remove or replace invalid characters and remove leading/trailing spaces
+        return re.sub(r'[<>:"/\\|?*]', '_', filename).strip(' .')
     
     def format_filename(self, template, metadata):
         """Format filename using template and metadata"""
@@ -336,75 +333,6 @@ class FlacToMp3Converter:
         except KeyError as e:
             self.log(f"Invalid template variable: {e}. Falling back to default filename format.")
             return self.sanitize_filename(f"{metadata['artist']} - {metadata['title']}")
-    
-    def convert_file(self, flac_path, output_path):
-        """Convert single FLAC file to MP3"""
-        lame_path = self.lame_path_var.get()
-        ffmpeg_path = self.ffmpeg_path_var.get()
-        quality = self.quality_var.get()
-        
-        try:
-            # Create the command pipeline: ffmpeg -> lame
-            ffmpeg_cmd = [
-                ffmpeg_path, "-y", "-i", str(flac_path),
-                "-f", "wav", # Specify output format as WAV for piping
-                "-acodec", "pcm_s16le", # Force PCM 16-bit little-endian for raw audio
-                "-" # Output to stdout
-            ]
-            
-            lame_cmd = [
-                lame_path, "-b", quality,
-                "-", # Input from stdin
-                str(output_path)
-            ]
-            
-            # Run ffmpeg process, redirect stderr to DEVNULL to prevent blocking from its output
-            # We'll still retrieve it later with communicate() but it won't block the pipe during transfer
-            ffmpeg_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE # Changed to PIPE to still allow capture later
-                                        # But the key is that communicate() will consume it
-            )
-            
-            # Run lame process, feed it ffmpeg's stdout, and redirect lame's stderr to DEVNULL
-            lame_process = subprocess.Popen(
-                lame_cmd,
-                stdin=ffmpeg_process.stdout,
-                stderr=subprocess.PIPE # Changed to PIPE to still allow capture later
-            )
-            
-            # Close ffmpeg stdout in the parent process. This is crucial
-            # to prevent deadlocks when the ffmpeg process finishes
-            # writing and closes its stdout, signaling EOF to lame.
-            ffmpeg_process.stdout.close()
-            
-            # Wait for both processes to complete and capture their stderr
-            # communicate() here does the waiting and deadlock prevention
-            # It's crucial to call communicate() on BOTH processes.
-            # Call lame_process.communicate() first because it relies on ffmpeg's stdout.
-            # Once lame is done, ffmpeg should also be done or finish shortly.
-            lame_stdout_data, lame_stderr_data = lame_process.communicate()
-            ffmpeg_stdout_data, ffmpeg_stderr_data = ffmpeg_process.communicate()
-
-            # Decode stderr outputs for logging if there's any output
-            lame_stderr_decoded = lame_stderr_data.decode('utf-8', errors='ignore').strip()
-            ffmpeg_stderr_decoded = ffmpeg_stderr_data.decode('utf-8', errors='ignore').strip()
-
-            if lame_process.returncode == 0 and ffmpeg_process.returncode == 0:
-                return True
-            else:
-                self.log(f"Conversion failed for {flac_path.name}.")
-                if ffmpeg_stderr_decoded:
-                    self.log(f"FFmpeg stderr: {ffmpeg_stderr_decoded}")
-                if lame_stderr_decoded:
-                    self.log(f"LAME stderr: {lame_stderr_decoded}")
-                self.log(f"FFmpeg return code: {ffmpeg_process.returncode}, LAME return code: {lame_process.returncode}")
-                return False
-                
-        except Exception as e:
-            self.log(f"Conversion error for {flac_path.name}: {str(e)}")
-            return False
 
     def convert_file(self, flac_path, output_path):
         """Convert single FLAC file to MP3 via an intermediate WAV file."""
@@ -547,8 +475,8 @@ class FlacToMp3Converter:
         template = self.settings["filename_template"]
         
         # Find all FLAC files
-        flac_files = list(source_folder.glob("*.flac"))
-        flac_files.extend(source_folder.glob("*.FLAC"))
+        flac_files = (set(source_folder.glob("*.flac"))).union(set(source_folder.glob("*.FLAC")))
+        #flac_files.extend(source_folder.glob("*.FLAC"))
         
         if not flac_files:
             self.log("No FLAC files found in source folder")
@@ -587,7 +515,7 @@ class FlacToMp3Converter:
         # Final progress update
         self.progress_var.set(100)
         self.status_var.set(f"Complete: {converted} converted, {failed} failed")
-        self.log(f"\nConversion complete: {converted} files converted, {failed} failed")
+        self.log(f"\nConversion complete: {converted} files converted, {failed} failed\n")
         
         # Re-enable convert button
         self.convert_button.config(state='normal')
